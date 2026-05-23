@@ -69,7 +69,7 @@ def run_agent(user_message):
             #   "claude-opus-4-7" = latest, smartest model
             #   "claude-sonnet-4-6" = faster, cheaper
             #   Choose based on speed vs quality tradeoff
-            model="claude-opus-4-7",
+            model="claude-sonnet-4-6",
 
             # max_tokens: Max length of Claude's response
             #   1024 tokens ≈ 4000 characters
@@ -136,13 +136,83 @@ def run_agent(user_message):
             print(f"\n✅ Final answer: {response.content[0].text}")
             break  # Exit the loop
 
-# Test it
-print("=" * 60)
-print("Test 1: Simple weather query")
-print("=" * 60)
-run_agent("What's the weather in Mumbai?")
+# Test function to visualize the agent flow WITHOUT needing the API
+def test_multi_step_chain():
+    """Visualize how messages grow during a multi-step chain"""
+    print("\n" + "=" * 70)
+    print("SIMULATING: 'What is 15% of average engineer salary?'")
+    print("=" * 70)
+    
+    # STEP 1: User asks question
+    messages = [{"role": "user", "content": "What is 15% of average engineer salary at a top Indian startup?"}]
+    print("\n📋 STEP 1 - User asks:")
+    print(f"  messages = {messages}")
+    
+    # STEP 2: Claude says "I need to search"
+    print("\n🤖 STEP 2 - Claude's response (stop_reason='tool_use'):")
+    print("  Claude says: 'I need to search for this data'")
+    # Simulate Claude's tool_use response
+    messages.append({
+        "role": "assistant",
+        "content": "search_web tool will be called with query='average software engineer salary India'"
+    })
+    print(f"  messages now has {len(messages)} items")
+    
+    # STEP 3: We execute search, get result
+    print("\n⚙️  STEP 3 - We execute search_web:")
+    search_result = "Average salary at top Indian startups: ₹15-20 lakhs per year"
+    print(f"  Result: {search_result}")
+    messages.append({
+        "role": "user",
+        "content": f"Tool result: {search_result}"
+    })
+    print(f"  messages now has {len(messages)} items")
+    
+    # STEP 4: Claude sees result, says "Now I'll calculate"
+    print("\n🤖 STEP 4 - Claude's response (stop_reason='tool_use' again):")
+    print("  Claude says: 'Now I need to calculate 15% of 18 lakhs'")
+    messages.append({
+        "role": "assistant",
+        "content": "calculate tool will be called with expression='1800000 * 0.15'"
+    })
+    print(f"  messages now has {len(messages)} items")
+    
+    # STEP 5: We execute calculate
+    print("\n⚙️  STEP 5 - We execute calculate:")
+    calc_result = str(1800000 * 0.15)
+    print(f"  Result: ₹{calc_result}")
+    messages.append({
+        "role": "user",
+        "content": f"Tool result: {calc_result}"
+    })
+    print(f"  messages now has {len(messages)} items")
+    
+    # STEP 6: Claude has final answer
+    print("\n🤖 STEP 6 - Claude's response (stop_reason='end_turn'):")
+    final_answer = "15% of the average software engineer salary at a top Indian startup (₹18 lakhs) is ₹2.7 lakhs per year."
+    print(f"  ✅ Final answer: {final_answer}")
+    messages.append({
+        "role": "assistant",
+        "content": final_answer
+    })
+    print(f"  messages now has {len(messages)} items")
+    
+    print("\n" + "=" * 70)
+    print("📊 FINAL CONVERSATION HISTORY:")
+    print("=" * 70)
+    for i, msg in enumerate(messages, 1):
+        role = "USER" if msg["role"] == "user" else "CLAUDE"
+        print(f"\n{i}. [{role}]")
+        print(f"   {msg['content'][:80]}..." if len(msg['content']) > 80 else f"   {msg['content']}")
 
-print("\n" + "=" * 60)
-print("Test 2: Multi-step chain (search + calculate)")
-print("=" * 60)
-run_agent("What is 15% of the average software engineer salary at a top Indian startup?")
+
+# Run the visualization test
+if __name__ == "__main__":
+    test_multi_step_chain()
+
+    # Uncomment below when you have valid ANTHROPIC_API_KEY:
+    # print("\n" + "=" * 60)
+    # print("RUNNING REAL AGENT (requires API key)")
+    # print("=" * 60)
+    # run_agent("What's the weather in Mumbai?")
+    # run_agent("What is 15% of the average software engineer salary at a top Indian startup?")
