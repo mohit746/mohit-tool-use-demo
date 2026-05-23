@@ -1,5 +1,5 @@
 from groq import Groq
-from duckduckgo_search import DDGS
+from ddgs import DDGS  # Updated: use ddgs (duckduckgo_search is deprecated)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -68,11 +68,21 @@ def execute_tool(name, inputs):
 
 # Step 3: The agent loop — THIS is what you need to understand cold
 def run_agent(user_message):
+    # IMPORTANT: System prompt MUST be first message in Groq API
+    # This tells Groq HOW to think before it sees the user's question
+    # Keep system prompts simple - Groq can be sensitive to complex prompts with tools
+    # system_prompt = "You are a helpful assistant. Use tools to answer questions accurately."
+    system_prompt = "You must ALWAYS call search_web first before calculate. Never assume salary or financial data."
+
     # messages = conversation history as a list of message objects
-    # Each message: {"role": "user" or "assistant", "content": text, "tool_calls": [...]}
-    # We START with just the user's question
-    # As the loop runs, we ADD assistant responses + tool results to this list
-    messages = [{"role": "user", "content": user_message}]
+    # ORDER MATTERS:
+    #   1. System prompt (how to behave)
+    #   2. User question
+    #   3. Assistant responses + tool results
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message}
+    ]
 
     while True:
         # CLIENT.CHAT.COMPLETIONS.CREATE() - Call Groq API
@@ -100,6 +110,7 @@ def run_agent(user_message):
             #   After 2nd loop: sees search result, can now answer
             #   This is how Groq "remembers" what happened before
             messages=messages,
+           
         )
 
         # RESPONSE object contains:
