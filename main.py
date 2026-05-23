@@ -71,8 +71,7 @@ def run_agent(user_message):
     # IMPORTANT: System prompt MUST be first message in Groq API
     # This tells Groq HOW to think before it sees the user's question
     # Keep system prompts simple - Groq can be sensitive to complex prompts with tools
-    # system_prompt = "You are a helpful assistant. Use tools to answer questions accurately."
-    system_prompt = "You must ALWAYS call search_web first before calculate. Never assume salary or financial data."
+    system_prompt = "You are a helpful assistant. Use tools to answer questions accurately."
 
     # messages = conversation history as a list of message objects
     # ORDER MATTERS:
