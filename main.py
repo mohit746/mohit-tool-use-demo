@@ -140,11 +140,13 @@ def run_agent(user_message):
                 })
 
                 # Add the tool RESULT back to messages
-                # This tells Groq: "You asked for X, here's the result"
+                # Groq format: tool results go in a simple text message that references the tool call
+                # The LLM can see from the content what tool was called and what the result was
                 # Groq will see this and either ask for another tool OR give final answer
                 messages.append({
-                    "role": "user",
-                    "content": f"Tool {tool_name} returned: {result}"
+                    "role": "tool",
+                    "content": result,
+                    "tool_call_id": tool_call.id
                 })
             # Loop continues → calls chat.completions.create() AGAIN with full history
 
