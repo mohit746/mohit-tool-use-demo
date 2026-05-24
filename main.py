@@ -109,16 +109,17 @@ tools = [
 # Step 2: Real tool executors
 def execute_tool(name, inputs):
     try:
-        if name == "get_weather":
-            try:
-                city = inputs.get('city', 'Unknown')
-                return f"Weather in {city}: 28°C, sunny"
-            except Exception as e:
-                error_msg = f"get_weather failed: {type(e).__name__}: {str(e)}"
-                print(f"    ⚠️  {error_msg}")
-                return error_msg
+        # if name == "get_weather":
+        #     try:
+        #         city = inputs.get('city', 'Unknown')
+        #         return f"Weather in {city}: 28°C, sunny"
+        #     except Exception as e:
+        #         error_msg = f"get_weather failed: {type(e).__name__}: {str(e)}"
+        #         print(f"    ⚠️  {error_msg}")
+        #         return error_msg
 
-        elif name == "calculate":
+        # el
+        if name == "calculate":
             try:
                 expression = inputs.get('expression', '')
                 result = eval(expression)
@@ -215,11 +216,14 @@ def run_agent(user_message):
         except Exception as e:
             retry_count += 1
             if "429" in str(e):  # Too Many Requests
-                print("Rate limit hit. Waiting before retrying...")
-                break
-            if retry_count > 3:
-                print("❌ Max retries exceeded.")
-                break
+                if retry_count > 3:
+                    print("❌ Max retries exceeded.")
+                    break
+                else:
+                    wait = min(2 * retry_count, 60)
+                    print(f"Rate limit hit. Waiting {wait}s before retrying...")
+                    import time; time.sleep(wait)
+                    continue
             else:
                 print(f"\n❌ API Error: {type(e).__name__}")
                 print("Retrying with simpler request...")
@@ -370,20 +374,67 @@ def test_multi_step_chain():
         role = "USER" if msg["role"] == "user" else "CLAUDE"
         print(f"\n{i}. [{role}]")
         print(f"   {msg['content'][:80]}..." if len(msg['content']) > 80 else f"   {msg['content']}")
+conversation_history = []
 
-
+def chat(user_input):
+    # Add user message
+    conversation_history.append({"role": "user", "content": user_input})
+    
+    while True:
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=conversation_history,
+                tools=tools,
+                tool_choice="auto"
+            )
+            
+            msg = response.choices[0].message
+            
+            # If no tool call — final answer
+            if msg.tool_calls:
+                # Tool call — append assistant's tool_call message AS-IS
+                conversation_history.append(msg)  # ← this includes tool_calls
+                
+                # Execute each tool and append results
+                for tool_call in msg.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+                    
+                    result = execute_tool(tool_name, tool_args)  # your existing tool executor
+                    
+                    # Append tool result with matching tool_call_id
+                    conversation_history.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": str(result)
+                    })
+            else:
+                conversation_history.append({"role": "assistant", "content": msg.content})
+                
+                # Groq said: "I have my final answer"
+                # finish_reason == "stop"
+                # message.content has the actual answer text
+                print(f"\n✅ Final answer: {msg.content}")
+                return msg.content
+        except Exception as tool_error:
+                print(f"❌ Error processing tool call: {str(tool_error)}")
+                break
+        
 # Run the visualization test + real agent
 if __name__ == "__main__":
     # test_multi_step_chain()
 
-    print("\n" + "=" * 90)
-    print("Test 1: RUNNING REAL AGENT with Groq")
-    print("=" * 90)
-    # run_agent("What's the weather?")
-    run_agent("What's the weather in Udaipur, Rajasthan?")
+    # print("\n" + "=" * 90)
+    # print("Test 1: RUNNING REAL AGENT with Groq")
+    # print("=" * 90)
+    # # run_agent("What's the weather?")
+    # run_agent("What's the weather in Udaipur, Rajasthan?")
     
-    print("\n" + "=" * 90)
-    print("TEST 2: Multi-step chain")
-    print("=" * 90)
-    run_agent("What is 15% of the average software engineer salary at a top Indian startup?")
+    # print("\n" + "=" * 90)
+    # print("TEST 2: Multi-step chain")
+    # print("=" * 90)
+    # run_agent("What is 15% of the average software engineer salary at a top Indian startup?")
+
+    chat(input("\nAsk me anything: "))
     print_log_summary()
