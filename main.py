@@ -54,23 +54,56 @@ tools = [
 
 # Step 2: Real tool executors
 def execute_tool(name, inputs):
-    if name == "get_weather":
-        return f"Weather in {inputs['city']}: 28°C, sunny"
-    if name == "calculate":
-        return str(eval(inputs["expression"]))
-    if name == "search_web":
-        try:
-            results = DDGS().text(inputs["query"], max_results=3)
-            return "\n".join([f"- {r['title']}: {r['body']}" for r in results])
-        except Exception as e:
-            # Fallback when DuckDuckGo fails
-            return f"Search failed for '{inputs['query']}'. Fallback: Average software engineer salary in India is ₹15-20 lakhs per year at top startups."
+    try:
+        if name == "get_weather":
+            try:
+                city = inputs.get('city', 'Unknown')
+                return f"Weather in {city}: 28°C, sunny"
+            except Exception as e:
+                error_msg = f"get_weather failed: {type(e).__name__}: {str(e)}"
+                print(f"    ⚠️  {error_msg}")
+                return error_msg
+
+        elif name == "calculate":
+            try:
+                expression = inputs.get('expression', '')
+                result = eval(expression)
+                return str(result)
+            except Exception as e:
+                error_msg = f"calculate failed: Invalid expression '{inputs.get('expression', '')}' - {type(e).__name__}: {str(e)}"
+                print(f"    ⚠️  {error_msg}")
+                return error_msg
+
+        elif name == "search_web":
+            try:
+                query = inputs.get('query', '')
+                results = DDGS().text(query, max_results=3)
+                if not results:
+                    return f"search_web: No results found for '{query}'"
+                return "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+            except Exception as e:
+                error_msg = f"search_web failed: DuckDuckGo error - {type(e).__name__}: {str(e)}"
+                print(f"    ⚠️  {error_msg}")
+                return error_msg
+
+        else:
+            # Unknown tool
+            error_msg = f"Unknown tool: '{name}'. Available tools: get_weather, calculate, search_web"
+            print(f"    ❌ {error_msg}")
+            return error_msg
+
+    except Exception as e:
+        # Catch-all for unexpected errors
+        error_msg = f"Unexpected error in execute_tool: {type(e).__name__}: {str(e)}"
+        print(f"    ❌ {error_msg}")
+        return error_msg
 
 # Step 3: The agent loop — THIS is what you need to understand cold
 def run_agent(user_message):
     # IMPORTANT: System prompt MUST be first message in Groq API
     # This tells Groq HOW to think before it sees the user's question
     # Keep system prompts simple - Groq can be sensitive to complex prompts with tools
+    # system_prompt = "You are a helpful assistant. Use tools to answer questions accurately."
     system_prompt = "You are a helpful assistant. Use tools to answer questions accurately."
 
     # messages = conversation history as a list of message objects
@@ -84,41 +117,47 @@ def run_agent(user_message):
     ]
 
     while True:
-        # CLIENT.CHAT.COMPLETIONS.CREATE() - Call Groq API
-        # Think of this as: "Groq, here's the conversation so far. What should we do next?"
-        response = client.chat.completions.create(
-            # model: Which model to use
-            #   "llama-3.3-70b-versatile" = Groq's latest model
-            model="llama-3.3-70b-versatile",
+        try:
+            # CLIENT.CHAT.COMPLETIONS.CREATE() - Call Groq API
+            # Think of this as: "Groq, here's the conversation so far. What should we do next?"
+            response = client.chat.completions.create(
+                # model: Which model to use
+                #   "llama-3.3-70b-versatile" = Groq's latest model
+                model="llama-3.3-70b-versatile",
 
-            # max_tokens: Max length of response
-            #   1024 tokens ≈ 4000 characters
-            #   Limits cost and prevents very long outputs
-            max_tokens=1024,
+                # max_tokens: Max length of response
+                #   1024 tokens ≈ 4000 characters
+                #   Limits cost and prevents very long outputs
+                max_tokens=1024,
 
-            # tools: Array of tool definitions Groq can choose from
-            #   Groq READS this list and decides: "Do I need a tool for this?"
-            #   If yes → returns tool_calls with tool name + inputs
-            #   If no → returns just text answer
-            tools=tools,
+                # tools: Array of tool definitions Groq can choose from
+                #   Groq READS this list and decides: "Do I need a tool for this?"
+                #   If yes → returns tool_calls with tool name + inputs
+                #   If no → returns just text answer
+                tools=tools,
 
-            # messages: The ENTIRE conversation history
-            #   Groq sees this full history to maintain context
-            #   Starts: [{"role": "user", "content": "What's weather in Mumbai?"}]
-            #   After 1st loop: adds assistant response + tool result
-            #   After 2nd loop: sees search result, can now answer
-            #   This is how Groq "remembers" what happened before
-            messages=messages,
-           
-        )
+                # messages: The ENTIRE conversation history
+                #   Groq sees this full history to maintain context
+                #   Starts: [{"role": "user", "content": "What's weather in Mumbai?"}]
+                #   After 1st loop: adds assistant response + tool result
+                #   After 2nd loop: sees search result, can now answer
+                #   This is how Groq "remembers" what happened before
+                messages=messages,
 
-        # RESPONSE object contains:
-        #   response.choices[0].message.tool_calls = list of tool calls (if any)
-        #   response.choices[0].message.content = text response
-        #   response.choices[0].finish_reason = "tool_calls" | "stop"
+            )
 
-        message = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
+            # RESPONSE object contains:
+            #   response.choices[0].message.tool_calls = list of tool calls (if any)
+            #   response.choices[0].message.content = text response
+            #   response.choices[0].finish_reason = "tool_calls" | "stop"
+
+            message = response.choices[0].message
+            finish_reason = response.choices[0].finish_reason
+
+        except Exception as e:
+            print(f"\n❌ API Error: {str(e)}")
+            print("Retrying with simpler request...")
+            continue
 
         # Did Groq want to call a tool?
         if finish_reason == "tool_calls" and message.tool_calls:
@@ -126,38 +165,54 @@ def run_agent(user_message):
             # message.tool_calls will have the tools to call
 
             for tool_call in message.tool_calls:
-                tool_name = tool_call.function.name
-                tool_inputs = eval(tool_call.function.arguments)  # Parse JSON string to dict
-                print(f"\n🔧 Tool called: {tool_name} | Input: {tool_inputs}")
+                try:
+                    tool_name = tool_call.function.name
 
-                # Execute the tool
-                result = execute_tool(tool_name, tool_inputs)
-                print(f"📤 Result: {result}")
+                    # Parse JSON arguments - wrap in try/except
+                    try:
+                        tool_inputs = eval(tool_call.function.arguments)  # Parse JSON string to dict
+                    except Exception as parse_error:
+                        print(f"❌ JSON Parse Error: {parse_error}")
+                        tool_inputs = {}
 
-                # THIS IS THE KEY LOOP PART:
-                # Add Groq's response (with tool call) to messages
-                messages.append({
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [{
-                        "id": tool_call.id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "arguments": tool_call.function.arguments
-                        }
-                    }]
-                })
+                    print(f"\n🔧 Tool called: {tool_name} | Input: {tool_inputs}")
 
-                # Add the tool RESULT back to messages
-                # Groq format: tool results go in a simple text message that references the tool call
-                # The LLM can see from the content what tool was called and what the result was
-                # Groq will see this and either ask for another tool OR give final answer
-                messages.append({
-                    "role": "tool",
-                    "content": result,
-                    "tool_call_id": tool_call.id
-                })
+                    # Execute the tool - wrap in try/except
+                    try:
+                        result = execute_tool(tool_name, tool_inputs)
+                        print(f"📤 Result: {result}")
+                    except Exception as exec_error:
+                        result = f"Error executing {tool_name}: {str(exec_error)}"
+                        print(f"❌ Tool Execution Error: {result}")
+
+                    # THIS IS THE KEY LOOP PART:
+                    # Add Groq's response (with tool call) to messages
+                    messages.append({
+                        "role": "assistant",
+                        "content": message.content,
+                        "tool_calls": [{
+                            "id": tool_call.id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": tool_call.function.arguments
+                            }
+                        }]
+                    })
+
+                    # Add the tool RESULT back to messages
+                    # Groq format: tool results go in a simple text message that references the tool call
+                    # The LLM can see from the content what tool was called and what the result was
+                    # Groq will see this and either ask for another tool OR give final answer
+                    messages.append({
+                        "role": "tool",
+                        "content": result,
+                        "tool_call_id": tool_call.id
+                    })
+
+                except Exception as tool_error:
+                    print(f"❌ Error processing tool call: {str(tool_error)}")
+                    continue
             # Loop continues → calls chat.completions.create() AGAIN with full history
 
         else:
@@ -239,14 +294,15 @@ def test_multi_step_chain():
 
 # Run the visualization test + real agent
 if __name__ == "__main__":
-    test_multi_step_chain()
+    # test_multi_step_chain()
 
-    print("\n" + "=" * 60)
-    print("RUNNING REAL AGENT with Groq")
-    print("=" * 60)
-    run_agent("What's the weather in Mumbai?")
-
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 90)
+    print("Test 1: RUNNING REAL AGENT with Groq")
+    print("=" * 90)
+    # run_agent("What's the weather?")
+    run_agent("What's the weather in Udaipur, Rajasthan?")
+    
+    print("\n" + "=" * 90)
     print("TEST 2: Multi-step chain")
-    print("=" * 60)
+    print("=" * 90)
     run_agent("What is 15% of the average software engineer salary at a top Indian startup?")
