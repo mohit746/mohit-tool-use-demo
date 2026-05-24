@@ -1,10 +1,35 @@
 from groq import Groq
 from ddgs import DDGS  # Updated: use ddgs (duckduckgo_search is deprecated)
 from dotenv import load_dotenv
+import json
+from datetime import datetime
+import time
 
 load_dotenv()
 
 client = Groq()  # uses GROQ_API_KEY from .env
+
+# Step 0: Logging utility for tool calls
+def log_tool_call(user_question, tool_name, tool_inputs, result, status="success", error=None):
+    """
+    Log every tool call to agent_logs.jsonl for debugging and analysis
+
+    Each line = one complete tool execution event
+    Includes: timestamp, user question, tool name, inputs, output, status
+    """
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "user_question": user_question,
+        "tool_name": tool_name,
+        "tool_inputs": tool_inputs,
+        "result": result,
+        "status": status,  # "success" or "failure"
+        "error": error     # Error details if failed
+    }
+
+    # Append to JSONL file (one JSON per line)
+    with open("agent_logs.jsonl", "a") as f:
+        f.write(json.dumps(log_entry) + "\n")
 
 # Step 1: Define your tools (Groq format)
 tools = [
@@ -106,6 +131,9 @@ def run_agent(user_message):
     # system_prompt = "You are a helpful assistant. Use tools to answer questions accurately."
     system_prompt = "You are a helpful assistant. Use tools to answer questions accurately."
 
+    # Save user question for logging purposes
+    original_user_question = user_message
+
     # messages = conversation history as a list of message objects
     # ORDER MATTERS:
     #   1. System prompt (how to behave)
@@ -178,12 +206,26 @@ def run_agent(user_message):
                     print(f"\n🔧 Tool called: {tool_name} | Input: {tool_inputs}")
 
                     # Execute the tool - wrap in try/except
+                    execution_status = "success"
+                    execution_error = None
                     try:
                         result = execute_tool(tool_name, tool_inputs)
                         print(f"📤 Result: {result}")
                     except Exception as exec_error:
+                        execution_status = "failure"
+                        execution_error = str(exec_error)
                         result = f"Error executing {tool_name}: {str(exec_error)}"
                         print(f"❌ Tool Execution Error: {result}")
+
+                    # LOG THE TOOL CALL - success or failure
+                    log_tool_call(
+                        user_question=original_user_question,
+                        tool_name=tool_name,
+                        tool_inputs=tool_inputs,
+                        result=result,
+                        status=execution_status,
+                        error=execution_error
+                    )
 
                     # THIS IS THE KEY LOOP PART:
                     # Add Groq's response (with tool call) to messages
