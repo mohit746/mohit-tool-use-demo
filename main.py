@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import json
 from datetime import datetime
 import time
+from collections import defaultdict
 
 load_dotenv()
 
@@ -30,6 +31,34 @@ def log_tool_call(user_question, tool_name, tool_inputs, result, status="success
     # Append to JSONL file (one JSON per line)
     with open("agent_logs.jsonl", "a") as f:
         f.write(json.dumps(log_entry) + "\n")
+
+def print_log_summary():
+    """Utility to print a summary of tool calls from the log file"""
+    try:
+        with open("agent_logs.jsonl", "r") as f:
+            logs = [json.loads(line) for line in f]
+
+        # print("\n📊 TOOL CALL SUMMARY:")
+        # for log in logs[-5:]:  # Print last 5 tool calls
+        #     print(f"- [{log['timestamp']}] {log['tool_name']} called with {log['tool_inputs']} → Status: {log['status']}")
+        #     if log['status'] == "failure":
+        #         print(f"    Error: {log['error']}")
+        
+        tool_stats = defaultdict(lambda: {"total": 0, "success": 0, "failure": 0})
+        for log in logs:
+            tool_name = log['tool_name']
+            tool_stats[tool_name]["total"] += 1
+            if log['status'] == "success":
+                tool_stats[tool_name]["success"] += 1
+            else:
+                tool_stats[tool_name]["failure"] += 1
+
+        print("\n📊 TOOL CALL SUMMARY:")
+        for tool_name in tool_stats:
+            print(f"  - {tool_name} : {tool_stats[tool_name]['total']} calls, {tool_stats[tool_name]['success']} successes")
+
+    except FileNotFoundError:
+        print("No logs found yet.")
 
 # Step 1: Define your tools (Groq format)
 tools = [
@@ -125,6 +154,7 @@ def execute_tool(name, inputs):
 
 # Step 3: The agent loop — THIS is what you need to understand cold
 def run_agent(user_message):
+    retry_count = 0
     # IMPORTANT: System prompt MUST be first message in Groq API
     # This tells Groq HOW to think before it sees the user's question
     # Keep system prompts simple - Groq can be sensitive to complex prompts with tools
@@ -183,9 +213,17 @@ def run_agent(user_message):
             finish_reason = response.choices[0].finish_reason
 
         except Exception as e:
-            print(f"\n❌ API Error: {str(e)}")
-            print("Retrying with simpler request...")
-            continue
+            retry_count += 1
+            if "429" in str(e):  # Too Many Requests
+                print("Rate limit hit. Waiting before retrying...")
+                break
+            if retry_count > 3:
+                print("❌ Max retries exceeded.")
+                break
+            else:
+                print(f"\n❌ API Error: {type(e).__name__}")
+                print("Retrying with simpler request...")
+                break
 
         # Did Groq want to call a tool?
         if finish_reason == "tool_calls" and message.tool_calls:
@@ -348,3 +386,4 @@ if __name__ == "__main__":
     print("TEST 2: Multi-step chain")
     print("=" * 90)
     run_agent("What is 15% of the average software engineer salary at a top Indian startup?")
+    print_log_summary()
