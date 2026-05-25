@@ -1,65 +1,60 @@
 # mohit-tool-use-demo
 
-A learning project demonstrating **agent loops with tool use** across multiple LLM APIs (Groq, Anthropic).
+An autonomous agent that chains multiple tools to answer complex queries — built with Groq/Llama and Google Gemini, with multi-turn conversation memory and structured JSON logging.
 
-## What This Teaches
+Ask it *"What is 15% of Stripe's CEO's annual salary?"* and it will search the web, extract the number, calculate, and answer — automatically, in one shot.
 
-### Stage 1 — Single-turn agent loop
-An **agent** is a loop where an LLM decides which tools to use, you execute them, and feed results back to the LLM:
-1. Define tools with descriptions (get_weather, calculate, search_web)
-2. Send user question + tools to LLM
-3. LLM decides: "I need tool X"
-4. You execute tool → get result
-5. Feed result back in conversation history
-6. Loop until LLM says "I have the answer"
+## Architecture
 
-The key insight: **messages list grows with each iteration**, so the LLM always sees the full context and can chain multiple tools.
+```
+User Query → LLM (Groq/Llama) → Tool Router → [search_web | calculate | get_weather]
+                ↑                                          ↓
+        Conversation History ←←←←←←←←←←← Tool Result + JSONL Log
+```
 
-### Stage 2 — Multi-turn conversation memory
-A single `conversation_history` list lives outside the agent function and persists across turns within a session:
+## Stack
 
-- **Intra-turn memory**: the tool call loop inside one question (search → calculate → answer)
-- **Inter-turn memory**: `conversation_history` passed to every API call so the model can reference what was said earlier
-
-The model answers "What did you find?" correctly because the full prior exchange is included in every request. This memory is **in-process only** — it resets when the Python process exits.
+| | |
+|---|---|
+| LLM (primary) | Groq — llama-3.3-70b-versatile |
+| LLM (secondary) | Google Gemini 2.5 Flash |
+| Web search | DuckDuckGo (ddgs) |
+| Logging | JSONL — one structured event per tool call |
+| Language | Python 3.10+ |
 
 ## How to Run
 
 ```bash
-pip install groq python-dotenv ddgs
-export GROQ_API_KEY="your-key-here"
-python main.py
+git clone https://github.com/mohit746/mohit-tool-use-demo.git && cd mohit-tool-use-demo
+pip install -r requirements.txt
+GROQ_API_KEY=your-key python main.py
 ```
+
+For Gemini: `GEMINI_API_KEY=your-key python gemini_agent.py`
+
+## How It Works
+
+Two memory layers run simultaneously:
+
+**Intra-turn loop** — within one question, the agent keeps calling tools until it has enough to answer. LLM calls `search_web` → result appended to messages → LLM calls `calculate` → result appended → LLM returns final answer.
+
+**Inter-turn memory** — `conversation_history` lives outside the function and is passed on every API call. Turn 2 can reference Turn 1 because the model sees the full prior exchange.
+
+```
+Turn 1: "Search for Stripe"     → history grows to 4 messages
+Turn 2: "What did you find?"    → model sees all 4, answers without re-searching
+```
+
+## Key Learning: Groq System Prompt Quirk
+
+Groq/Llama breaks tool call formatting when the system prompt contains ordering or prescriptive instructions. The model generates malformed `<function=tool_name=args>` syntax that the API rejects with a 400 error.
+
+Fix: keep the system prompt minimal — `"You are a helpful assistant. Use tools to answer questions accurately."` — and put any task-specific framing in the user message instead.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Groq agent with tool use + conversation history |
-| `gemini_agent.py` | Same pattern implemented with Google Gemini API |
-
-## Architecture
-
-```
-User input
-    ↓
-conversation_history.append(user message)
-    ↓
-┌─────────────────────────────────┐
-│  while True (intra-turn loop)   │
-│    API call with full history   │
-│    ↓                            │
-│    tool_calls? → execute tool   │
-│               → append result   │
-│               → loop again      │
-│    no tool_calls? → return ans  │
-└─────────────────────────────────┘
-    ↓
-conversation_history.append(answer)
-    ↓
-Next user input sees full history
-```
-
-## Interview Talking Point
-
-When asked "How do agents work?": The agent loop — send query with tools → LLM decides tool → execute → feed result back → loop. The LLM sees full history so context never breaks. For multi-turn chat, a persistent `conversation_history` list is passed on every API call — the model has no memory of its own, it only knows what you send it.
+| `main.py` | Groq agent — multi-turn CLI chat with tool use and JSONL logging |
+| `gemini_agent.py` | Same pattern on Google Gemini API (different message format) |
+| `analyze_logs.py` | Parse `agent_logs.jsonl` for per-tool success/failure stats |
